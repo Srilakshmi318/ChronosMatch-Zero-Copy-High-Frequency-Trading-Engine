@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+.venv/
+orders_buffer.bin
+build/
+*.pyd
+*.c
