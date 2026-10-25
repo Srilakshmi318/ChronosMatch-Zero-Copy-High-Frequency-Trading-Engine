@@ -1,0 +1,11 @@
+
+ChronosMatch - Initial Benchmark Results
+
+Orders submitted: 10000
+Elapsed time: 0.613433 seconds
+Order submissions per second: 16301.70
+Average time per submission: 61.34 microseconds
+
+Test type: Sequential buy-order submission.
+Note: This is a preliminary baseline. It measures order submission,
+not full trade-matching throughput. Results vary by hardware and runtime.
