@@ -1,17 +1,14 @@
 
 import mmap
+import math
 import os
 import struct
 import time
 
-# Buffer configuration
 BUFFER_FILE = "orders_buffer.bin"
 CAPACITY = 1024
 
-# Header: write position and read position
 HEADER = struct.Struct("<II")
-
-# Order: ID, side, price in paise, quantity, timestamp
 ORDER = struct.Struct("<IBqIQ")
 
 HEADER_SIZE = HEADER.size
@@ -20,27 +17,49 @@ BUFFER_SIZE = HEADER_SIZE + CAPACITY * ORDER.size
 
 class RingBuffer:
     def __init__(self, filename=BUFFER_FILE, capacity=CAPACITY):
+        if type(capacity) is not int or capacity < 2:
+            raise ValueError("Capacity must be an integer of at least 2")
+
         self.filename = filename
         self.capacity = capacity
         self.header = HEADER
         self.order = ORDER
         self.header_size = HEADER.size
-        self.buffer_size = (
-            self.header_size + capacity * ORDER.size
-        )
+        self.buffer_size = HEADER.size + capacity * ORDER.size
 
-        # Create or reset the backing file for this run.
-        with open(filename, "wb") as file:
-            file.truncate(self.buffer_size)
+        self.file = open(filename, "w+b")
+        self.file.truncate(self.buffer_size)
 
-        self.file = open(filename, "r+b")
-        self.memory = mmap.mmap(
-            self.file.fileno(), self.buffer_size
-        )
-
-        self.header.pack_into(self.memory, 0, 0, 0)
+        try:
+            self.memory = mmap.mmap(
+                self.file.fileno(), self.buffer_size
+            )
+            self.header.pack_into(self.memory, 0, 0, 0)
+        except Exception:
+            self.file.close()
+            raise
 
     def write(self, order_id, side, price, quantity):
+        if type(order_id) is not int or not 0 <= order_id <= 0xFFFFFFFF:
+            raise ValueError("Invalid order ID")
+
+        if not isinstance(side, str) or side.upper() not in ("B", "S"):
+            raise ValueError("Side must be B or S")
+
+        if isinstance(price, bool) or not isinstance(price, (int, float)):
+            raise ValueError("Price must be numeric")
+
+        if not math.isfinite(price) or price <= 0:
+            raise ValueError("Price must be positive and finite")
+
+        if type(quantity) is not int or not 0 < quantity <= 0xFFFFFFFF:
+            raise ValueError("Quantity must be a positive 32-bit integer")
+
+        price_paise = round(price * 100)
+
+        if not 0 < price_paise <= 0x7FFFFFFFFFFFFFFF:
+            raise ValueError("Price is outside supported range")
+
         write_pos, read_pos = self.header.unpack_from(
             self.memory, 0
         )
@@ -48,17 +67,12 @@ class RingBuffer:
         next_pos = (write_pos + 1) % self.capacity
 
         if next_pos == read_pos:
-            return False  # Buffer is full
+            return False
 
         side_code = 1 if side.upper() == "B" else 2
-
-        # Store price as integer paise to avoid float errors.
-        price_paise = round(price * 100)
         timestamp_ns = time.perf_counter_ns()
 
-        offset = (
-            self.header_size + write_pos * self.order.size
-        )
+        offset = self.header_size + write_pos * self.order.size
 
         self.order.pack_into(
             self.memory,
@@ -73,6 +87,7 @@ class RingBuffer:
         self.header.pack_into(
             self.memory, 0, next_pos, read_pos
         )
+
         return True
 
     def read(self):
@@ -81,11 +96,9 @@ class RingBuffer:
         )
 
         if read_pos == write_pos:
-            return None  # Buffer is empty
+            return None
 
-        offset = (
-            self.header_size + read_pos * self.order.size
-        )
+        offset = self.header_size + read_pos * self.order.size
 
         order_id, side, price, quantity, timestamp = (
             self.order.unpack_from(self.memory, offset)
@@ -106,19 +119,30 @@ class RingBuffer:
         }
 
     def close(self):
-        self.memory.close()
-        self.file.close()
+        if not self.memory.closed:
+            self.memory.close()
+
+        if not self.file.closed:
+            self.file.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
-    buffer = RingBuffer()
-
-    try:
+    with RingBuffer() as buffer:
         buffer.write(1, "B", 150.25, 10)
         buffer.write(2, "S", 150.25, 5)
 
         print("Order 1:", buffer.read())
         print("Order 2:", buffer.read())
         print("Empty buffer:", buffer.read())
-    finally:
-        buffer.close()
