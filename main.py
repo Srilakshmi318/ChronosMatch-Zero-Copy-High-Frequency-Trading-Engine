@@ -4,62 +4,73 @@ import math
 
 
 class ChronosMatch:
+
     def __init__(self):
         self.buy_orders = []
         self.sell_orders = []
         self.trade_history = []
+        self.used_order_ids = set()
+        self.sequence = 0
 
     def validate_order(self, order_id, price, quantity):
-        if not isinstance(order_id, int) or order_id < 0:
+
+        if type(order_id) is not int or order_id < 0:
             raise ValueError("Invalid order ID")
 
-        if not isinstance(price, (int, float)):
+        if order_id in self.used_order_ids:
+            raise ValueError("Duplicate order ID")
+
+        if isinstance(price, bool) or not isinstance(price, (int, float)):
             raise ValueError("Price must be numeric")
 
         if not math.isfinite(price) or price <= 0:
             raise ValueError("Price must be positive and finite")
 
-        if not isinstance(quantity, int) or quantity <= 0:
+        if type(quantity) is not int or quantity <= 0:
             raise ValueError("Quantity must be a positive integer")
 
     def add_buy_order(self, order_id, price, quantity):
-        return self._add_order(
-            order_id, price, quantity, "BUY"
-        )
+        return self._add_order(order_id, price, quantity, "BUY")
 
     def add_sell_order(self, order_id, price, quantity):
-        return self._add_order(
-            order_id, price, quantity, "SELL"
-        )
+        return self._add_order(order_id, price, quantity, "SELL")
 
     def _add_order(self, order_id, price, quantity, side):
+
         self.validate_order(order_id, price, quantity)
+
+        self.sequence += 1
 
         order = {
             "id": order_id,
             "price": float(price),
             "quantity": quantity,
             "side": side,
-            "timestamp": time.perf_counter_ns()
+            "timestamp": time.perf_counter_ns(),
+            "sequence": self.sequence
         }
+
+        self.used_order_ids.add(order_id)
 
         if side == "BUY":
             self.buy_orders.append(order)
             self.buy_orders.sort(
-                key=lambda x: (-x["price"], x["timestamp"])
+                key=lambda x: (-x["price"], x["sequence"])
             )
         else:
             self.sell_orders.append(order)
             self.sell_orders.sort(
-                key=lambda x: (x["price"], x["timestamp"])
+                key=lambda x: (x["price"], x["sequence"])
             )
 
         return self.match_orders()
 
     def match_orders(self):
+
         new_trades = []
 
         while self.buy_orders and self.sell_orders:
+
             buy = self.buy_orders[0]
             sell = self.sell_orders[0]
 
@@ -71,8 +82,7 @@ class ChronosMatch:
                 sell["quantity"]
             )
 
-            # Execute at the older resting order's price.
-            if buy["timestamp"] < sell["timestamp"]:
+            if buy["sequence"] < sell["sequence"]:
                 execution_price = buy["price"]
             else:
                 execution_price = sell["price"]
@@ -99,22 +109,51 @@ class ChronosMatch:
 
         return new_trades
 
+    def cancel_order(self, order_id):
+
+        for orders in (self.buy_orders, self.sell_orders):
+
+            for order in orders:
+
+                if order["id"] == order_id:
+                    orders.remove(order)
+                    return True
+
+        return False
+
+    def get_order_book(self):
+
+        return {
+            "buy_orders": [
+                order.copy() for order in self.buy_orders
+            ],
+            "sell_orders": [
+                order.copy() for order in self.sell_orders
+            ]
+        }
+
     def display_order_book(self):
+
         print("\n--- BUY ORDERS ---")
+
         for order in self.buy_orders:
             print(order)
 
         print("\n--- SELL ORDERS ---")
+
         for order in self.sell_orders:
             print(order)
 
     def display_trades(self):
+
         print("\n--- TRADE HISTORY ---")
+
         for trade in self.trade_history:
             print(trade)
 
 
 if __name__ == "__main__":
+
     engine = ChronosMatch()
 
     print("ChronosMatch Engine Started")
